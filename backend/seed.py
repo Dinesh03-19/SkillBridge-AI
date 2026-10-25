@@ -13,6 +13,7 @@ from backend.services.parser import chunk_text
 from backend.services.embeddings import EmbeddingService
 from backend.services.competency_service import MOSPI_COMPETENCY_FRAMEWORK
 from backend.services.igot_service import SEED_IGOT_COURSES
+from backend.config import settings
 
 SAMPLE_DOCS = [
     {
@@ -182,9 +183,9 @@ def seed_database():
             db.commit()
 
     # 4. Seed Training Materials & Vectors
-    print("Seeding Official Training Documents & ChromaDB Vectors...")
+    print("Seeding Official Training Documents and vector embeddings...")
     embedding_service = EmbeddingService.get_instance()
-    os.makedirs("./uploads", exist_ok=True)
+    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
     materials_created = []
 
     for doc in SAMPLE_DOCS:
@@ -193,7 +194,7 @@ def seed_database():
             materials_created.append(existing)
             continue
 
-        file_path = f"./uploads/{doc['skill_id']}_sample.txt"
+        file_path = os.path.join(settings.UPLOAD_DIR, f"{doc['skill_id']}_sample.txt")
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(doc["content"])
 
@@ -230,7 +231,7 @@ def seed_database():
         db.commit()
         db.refresh(material)
         materials_created.append(material)
-        print(f"[OK] Seeded document: {doc['title']} ({len(chunks_data)} chunks indexed in ChromaDB)", flush=True)
+        print(f"[OK] Seeded document: {doc['title']} ({len(chunks_data)} chunks indexed)", flush=True)
 
     # 5. Pre-generate starter quiz if none exists
     existing_quiz = db.query(Quiz).first()
@@ -243,7 +244,7 @@ def seed_database():
             linked_skill_id="sampling_methodology",
             difficulty="intermediate",
             question_count=3,
-            generation_model="gemini-2.0-flash",
+            generation_model=settings.GEMINI_MODEL,
             generation_notes="Pre-seeded starter quiz for instant judge evaluation and demonstration."
         )
         db.add(sample_quiz)

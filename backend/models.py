@@ -43,7 +43,7 @@ class Quiz(Base):
     linked_skill_id = Column(String(100), nullable=False, index=True)
     difficulty = Column(String(50), default="intermediate")  # beginner, intermediate, advanced
     question_count = Column(Integer, default=5)
-    generation_model = Column(String(100), default="gemini-2.0-flash")
+    generation_model = Column(String(100), default="gemini-3.8-flash")
     created_at = Column(DateTime, default=datetime.utcnow)
     generation_notes = Column(Text, nullable=True)
 

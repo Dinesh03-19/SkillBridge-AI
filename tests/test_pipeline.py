@@ -1,6 +1,7 @@
 import unittest
 import os
 import sys
+from unittest.mock import patch
 
 # Ensure root in sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -12,6 +13,7 @@ from backend.services.validation import (
     validate_question_options,
     filter_duplicate_questions
 )
+from backend.services.embeddings import EmbeddingService
 
 class TestQuizPipeline(unittest.TestCase):
 
@@ -103,6 +105,49 @@ class TestQuizPipeline(unittest.TestCase):
         unique, discarded = filter_duplicate_questions([q1, q2, q3])
         self.assertEqual(len(unique), 2)
         self.assertEqual(len(discarded), 1)
+
+    def test_qdrant_vector_store_round_trip(self):
+        from qdrant_client import QdrantClient, models
+
+        client = QdrantClient(":memory:")
+        client.create_collection(
+            collection_name="test_materials",
+            vectors_config=models.VectorParams(size=3, distance=models.Distance.COSINE)
+        )
+
+        service = object.__new__(EmbeddingService)
+        service.use_qdrant = True
+        service.qdrant_client = client
+        service.qdrant_models = models
+        service.generate_embeddings = lambda texts, task_type="RETRIEVAL_DOCUMENT": [
+            [1.0, 0.0, 0.0] for _ in texts
+        ]
+
+        try:
+            with patch("backend.services.embeddings.settings.QDRANT_COLLECTION", "test_materials"):
+                ids = service.add_chunks(
+                    [{"chunk_index": 0, "chunk_text": "Survey sampling rules", "token_count": 3}],
+                    material_id=7,
+                    skill_id="sampling",
+                    doc_title="Sampling Manual"
+                )
+                results = service.retrieve_relevant_chunks(
+                    "sampling rules",
+                    skill_id="sampling",
+                    material_id=7
+                )
+
+                self.assertEqual(ids, ["mat_7_chunk_0"])
+                self.assertEqual(results[0]["id"], "mat_7_chunk_0")
+                self.assertEqual(results[0]["text"], "Survey sampling rules")
+
+                service.delete_material_chunks(7)
+                self.assertEqual(
+                    service.retrieve_relevant_chunks("sampling rules", skill_id="sampling"),
+                    []
+                )
+        finally:
+            client.close()
 
 if __name__ == "__main__":
     unittest.main()

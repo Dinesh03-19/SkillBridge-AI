@@ -1,5 +1,6 @@
 import os
 import time
+import logging
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -20,7 +21,8 @@ app = FastAPI(
 )
 
 import json
-import traceback
+
+logger = logging.getLogger(__name__)
 
 app.add_middleware(
     CORSMiddleware,
@@ -32,10 +34,9 @@ app.add_middleware(
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    tb = traceback.format_exc()
-    print("GLOBAL EXCEPTION:", tb, flush=True)
+    logger.exception("Unhandled request error for %s %s", request.method, request.url.path)
     return Response(
-        content=json.dumps({"detail": str(exc), "traceback": tb}),
+        content=json.dumps({"detail": "Internal server error"}),
         status_code=500,
         media_type="application/json"
     )
@@ -85,5 +86,5 @@ def health_check():
         "status": "healthy",
         "gemini_model": settings.GEMINI_MODEL,
         "database": settings.DATABASE_URL.split(":")[0],
-        "chroma_dir": settings.CHROMA_PERSIST_DIR
+        "vector_store": settings.VECTOR_STORE
     }

@@ -3,6 +3,7 @@ from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
+from backend.config import settings
 from backend.models import Quiz, QuizQuestion, GenerationLog, TrainingMaterial, DocumentChunk
 from backend.schemas import QuizGenerateRequest, QuizGenerationResponse, GeneratedQuestion
 from backend.services.embeddings import EmbeddingService
@@ -133,7 +134,7 @@ class QuizOrchestrationService:
             linked_skill_id=request.skill_id,
             difficulty=request.difficulty,
             question_count=len(valid_questions),
-            generation_model="gemini-2.0-flash",
+            generation_model=settings.GEMINI_MODEL,
             generation_notes=parsed_response.generation_notes
         )
         db.add(new_quiz)

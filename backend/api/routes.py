@@ -1,5 +1,7 @@
 import os
-import shutil
+import logging
+import tempfile
+import uuid
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -42,6 +44,7 @@ from backend.services.igot_service import IgotIntegrationService
 from backend.services.assistant_service import KarmayogiAssistantService
 
 router = APIRouter(prefix="/api", tags=["SkillBridge AI Core"])
+logger = logging.getLogger(__name__)
 
 # =========================================================================
 # 1. Training Document Hub & Content Pipeline
@@ -57,20 +60,28 @@ async def upload_training_material(
 ):
     """
     Upload training document (PDF/DOCX/TXT), extract text, split into chunks,
-    compute local embeddings via sentence-transformers, and store in ChromaDB & DB.
+    compute embeddings and store source files, vectors, and metadata persistently.
     """
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
 
-    file_title = title.strip() if title and title.strip() else file.filename
-    clean_filename = f"{skill_id}_{file.filename}"
-    save_path = os.path.join(settings.UPLOAD_DIR, clean_filename)
-
-    with open(save_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    original_filename = os.path.basename(file.filename.replace("\\", "/"))
+    if not original_filename:
+        raise HTTPException(status_code=400, detail="Invalid file name.")
+    file_title = title.strip() if title and title.strip() else original_filename
+    clean_filename = f"{uuid.uuid4().hex}_{original_filename}"
+    content = await file.read()
+    temp_path = None
+    blob_pathname = None
+    save_path = None
 
     try:
-        raw_text = extract_text(save_path)
+        suffix = os.path.splitext(original_filename)[1].lower()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+            temp_file.write(content)
+            temp_path = temp_file.name
+
+        raw_text = extract_text(temp_path)
         if not raw_text or not raw_text.strip():
             raise HTTPException(status_code=400, detail="Could not extract readable text from document.")
 
@@ -78,9 +89,27 @@ async def upload_training_material(
         if not chunks_data:
             raise HTTPException(status_code=400, detail="Document produced 0 readable text chunks.")
 
+        if os.environ.get("VERCEL") == "1":
+            from vercel import blob
+
+            upload = await blob.put_blob(
+                f"training-materials/{uuid.uuid4().hex}/{clean_filename}",
+                content,
+                access="private",
+                add_random_suffix=True
+            )
+            blob_pathname = upload.pathname
+            file_path = blob_pathname
+        else:
+            os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+            save_path = os.path.join(settings.UPLOAD_DIR, clean_filename)
+            with open(save_path, "wb") as buffer:
+                buffer.write(content)
+            file_path = save_path
+
         material = TrainingMaterial(
             title=file_title,
-            file_path=save_path,
+            file_path=file_path,
             linked_skill_id=skill_id,
             uploaded_by=uploaded_by,
             processed=False,
@@ -112,9 +141,24 @@ async def upload_training_material(
         db.refresh(material)
         return material
 
-    except Exception as e:
+    except HTTPException:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to process document: {str(e)}")
+        raise
+    except Exception:
+        db.rollback()
+        if blob_pathname:
+            try:
+                from vercel import blob
+                await blob.delete_blob(blob_pathname)
+            except Exception:
+                logger.exception("Failed to clean up uploaded Blob after document processing failed.")
+        elif save_path and os.path.exists(save_path):
+            os.remove(save_path)
+        logger.exception("Failed to process uploaded training material.")
+        raise HTTPException(status_code=500, detail="Failed to process document.")
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
 
 
 @router.get("/materials", response_model=List[TrainingMaterialOut])
