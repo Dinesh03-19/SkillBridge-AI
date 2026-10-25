@@ -1,6 +1,8 @@
 import unittest
 import os
 import sys
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -16,6 +18,26 @@ class TestSkillBridgeFullPlatform(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         data = res.json()
         self.assertEqual(data["status"], "healthy")
+
+    def test_private_blob_upload_processing(self):
+        content = b"Survey sampling methodology and field operations."
+        pathname = "training-materials/test-run/sample.txt"
+        with patch.dict(os.environ, {"VERCEL": "1"}):
+            with patch("vercel.blob.get_blob", new_callable=AsyncMock) as get_blob:
+                with patch("backend.api.routes.EmbeddingService.get_instance") as get_embedding_service:
+                    get_blob.return_value = SimpleNamespace(body=content)
+                    get_embedding_service.return_value.add_chunks.return_value = ["mat_99_chunk_0"]
+
+                    response = client.post("/api/materials/process-blob", json={
+                        "pathname": pathname,
+                        "skill_id": "sampling_methodology",
+                        "title": "Sampling notes",
+                        "uploaded_by": "Admin"
+                    })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["file_path"], pathname)
+        get_blob.assert_awaited_once_with(pathname, access="private")
 
     def test_coverage_100_percent(self):
         """Verify that PS alignment coverage is 100% across all 8 categories."""

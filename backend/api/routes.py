@@ -15,6 +15,7 @@ from backend.models import (
 )
 from backend.schemas import (
     TrainingMaterialOut,
+    TrainingMaterialBlobUploadRequest,
     QuizGenerateRequest,
     QuizOut,
     QuizSubmissionRequest,
@@ -45,34 +46,25 @@ from backend.services.assistant_service import KarmayogiAssistantService
 
 router = APIRouter(prefix="/api", tags=["SkillBridge AI Core"])
 logger = logging.getLogger(__name__)
+MAX_TRAINING_MATERIAL_BYTES = 25 * 1024 * 1024
+ALLOWED_TRAINING_MATERIAL_EXTENSIONS = {".pdf", ".docx", ".txt"}
 
 # =========================================================================
 # 1. Training Document Hub & Content Pipeline
 # =========================================================================
 
-@router.post("/materials/upload", response_model=TrainingMaterialOut)
-async def upload_training_material(
-    file: UploadFile = File(...),
-    title: Optional[str] = Form(None),
-    skill_id: str = Form(...),
-    uploaded_by: str = Form("Admin/Trainer"),
-    db: Session = Depends(get_db)
+async def _process_training_material(
+    content: bytes,
+    original_filename: str,
+    skill_id: str,
+    title: Optional[str],
+    uploaded_by: str,
+    db: Session,
+    blob_pathname: Optional[str] = None
 ):
-    """
-    Upload training document (PDF/DOCX/TXT), extract text, split into chunks,
-    compute embeddings and store source files, vectors, and metadata persistently.
-    """
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="No file provided")
-
-    original_filename = os.path.basename(file.filename.replace("\\", "/"))
-    if not original_filename:
-        raise HTTPException(status_code=400, detail="Invalid file name.")
     file_title = title.strip() if title and title.strip() else original_filename
     clean_filename = f"{uuid.uuid4().hex}_{original_filename}"
-    content = await file.read()
     temp_path = None
-    blob_pathname = None
     save_path = None
 
     try:
@@ -90,15 +82,16 @@ async def upload_training_material(
             raise HTTPException(status_code=400, detail="Document produced 0 readable text chunks.")
 
         if os.environ.get("VERCEL") == "1":
-            from vercel import blob
+            if not blob_pathname:
+                from vercel import blob
 
-            upload = await blob.put_blob(
-                f"training-materials/{uuid.uuid4().hex}/{clean_filename}",
-                content,
-                access="private",
-                add_random_suffix=True
-            )
-            blob_pathname = upload.pathname
+                upload = await blob.put_blob(
+                    f"training-materials/{uuid.uuid4().hex}/{clean_filename}",
+                    content,
+                    access="private",
+                    add_random_suffix=True
+                )
+                blob_pathname = upload.pathname
             file_path = blob_pathname
         else:
             os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
@@ -143,6 +136,12 @@ async def upload_training_material(
 
     except HTTPException:
         db.rollback()
+        if blob_pathname:
+            try:
+                from vercel import blob
+                await blob.delete_blob(blob_pathname)
+            except Exception:
+                logger.exception("Failed to clean up Blob after rejecting a training material.")
         raise
     except Exception:
         db.rollback()
@@ -159,6 +158,73 @@ async def upload_training_material(
     finally:
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
+
+
+@router.post("/materials/upload", response_model=TrainingMaterialOut)
+async def upload_training_material(
+    file: UploadFile = File(...),
+    title: Optional[str] = Form(None),
+    skill_id: str = Form(...),
+    uploaded_by: str = Form("Admin/Trainer"),
+    db: Session = Depends(get_db)
+):
+    """Upload and process a training material that fits within the function request limit."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    original_filename = os.path.basename(file.filename.replace("\\", "/"))
+    if not original_filename:
+        raise HTTPException(status_code=400, detail="Invalid file name.")
+    return await _process_training_material(
+        content=await file.read(),
+        original_filename=original_filename,
+        skill_id=skill_id,
+        title=title,
+        uploaded_by=uploaded_by,
+        db=db
+    )
+
+
+@router.post("/materials/process-blob", response_model=TrainingMaterialOut)
+async def process_uploaded_blob(
+    request: TrainingMaterialBlobUploadRequest,
+    db: Session = Depends(get_db)
+):
+    """Download and process a private Blob uploaded directly from the browser."""
+    if os.environ.get("VERCEL") != "1":
+        raise HTTPException(status_code=404, detail="Direct Blob uploads are enabled only on Vercel.")
+    if not request.pathname.startswith("training-materials/") or ".." in request.pathname.split("/"):
+        raise HTTPException(status_code=400, detail="Invalid training material path.")
+
+    original_filename = os.path.basename(request.pathname)
+    extension = os.path.splitext(original_filename)[1].lower()
+    if extension not in ALLOWED_TRAINING_MATERIAL_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Only PDF, DOCX, and TXT files are supported.")
+
+    from vercel import blob
+
+    try:
+        download = await blob.get_blob(request.pathname, access="private")
+    except Exception:
+        logger.exception("Failed to download uploaded training material from Blob.")
+        raise HTTPException(status_code=502, detail="Could not retrieve uploaded document.")
+
+    if len(download.body) > MAX_TRAINING_MATERIAL_BYTES:
+        try:
+            await blob.delete_blob(request.pathname)
+        except Exception:
+            logger.exception("Failed to delete an oversized training material from Blob.")
+        raise HTTPException(status_code=413, detail="Training documents must be 25 MB or smaller.")
+
+    return await _process_training_material(
+        content=download.body,
+        original_filename=original_filename,
+        skill_id=request.skill_id,
+        title=request.title,
+        uploaded_by=request.uploaded_by,
+        db=db,
+        blob_pathname=request.pathname
+    )
 
 
 @router.get("/materials", response_model=List[TrainingMaterialOut])

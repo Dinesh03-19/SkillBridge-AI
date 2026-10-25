@@ -417,12 +417,6 @@ async function handleUpload(e) {
     return;
   }
 
-  const formData = new FormData();
-  formData.append('file', fileInput.files[0]);
-  formData.append('title', title);
-  formData.append('skill_id', skill);
-  formData.append('uploaded_by', activeUser ? activeUser.name : 'MoSPI Assessment Specialist');
-
   const progress = document.getElementById('pipeline-progress');
   const btn = document.getElementById('btn-upload');
   progress.style.display = 'flex';
@@ -442,22 +436,46 @@ async function handleUpload(e) {
   setTimeout(() => { sChunk.className = 'step-item completed'; sEmbed.className = 'step-item active'; }, 1300);
 
   try {
-    const res = await fetch('/api/materials/upload', {
-      method: 'POST',
-      body: formData
-    });
+    const file = fileInput.files[0];
+    const runtimeResponse = await fetch('/api/runtime-config');
+    if (!runtimeResponse.ok) {
+      throw new Error("Could not determine upload settings.");
+    }
+    const runtimeConfig = await runtimeResponse.json();
+    let data;
 
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || "Failed to upload document");
+    if (runtimeConfig.direct_blob_uploads) {
+      if (typeof window.uploadTrainingMaterialDirect !== 'function') {
+        throw new Error("Direct file upload is not available. Please reload the page.");
+      }
+      data = await window.uploadTrainingMaterialDirect(file, {
+        title,
+        skillId: skill,
+        uploadedBy: activeUser ? activeUser.name : 'MoSPI Assessment Specialist'
+      });
+    } else {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('title', title);
+      formData.append('skill_id', skill);
+      formData.append('uploaded_by', activeUser ? activeUser.name : 'MoSPI Assessment Specialist');
+
+      const res = await fetch('/api/materials/upload', {
+        method: 'POST',
+        body: formData
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || "Failed to upload document");
+      }
+      data = await res.json();
     }
 
-    const data = await res.json();
     sEmbed.className = 'step-item completed';
     sReady.className = 'step-item completed';
 
     setTimeout(() => {
-      alert(`✓ Document "${data.title}" successfully processed and split into ${data.chunk_count} embedded chunks in ChromaDB!`);
+      alert(`✓ Document "${data.title}" successfully processed and split into ${data.chunk_count} embedded chunks!`);
       document.getElementById('upload-form').reset();
       document.getElementById('drop-text').innerText = "Click or drag & drop PDF / DOCX file here";
       progress.style.display = 'none';

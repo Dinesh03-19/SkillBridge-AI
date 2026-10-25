@@ -88,3 +88,7 @@ def health_check():
         "database": settings.DATABASE_URL.split(":")[0],
         "vector_store": settings.VECTOR_STORE
     }
+
+@app.get("/api/runtime-config")
+def runtime_config():
+    return {"direct_blob_uploads": os.environ.get("VERCEL") == "1"}

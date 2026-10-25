@@ -84,6 +84,9 @@ The Vercel deployment runs the FastAPI app as a Python Function. Vercel's functi
 - **Qdrant Cloud** for persistent vector search (`QDRANT_URL` and `QDRANT_API_KEY`)
 - **Vercel Blob**, configured as a **private** store, for uploaded source files
 - **Google Gemini API** for quiz generation and production embeddings (`GEMINI_API_KEY`)
+- **Vercel SSO deployment protection** for team-only app access
+
+The deployed upload flow sends files directly from the browser to private Blob storage, so supported PDF, DOCX, and TXT uploads can be up to 25 MB without passing through Vercel Function request-body limits. The project must remain SSO-protected; custom domains are not covered by the current protection scope.
 
 ### One-time setup
 
@@ -98,9 +101,16 @@ The Vercel deployment runs the FastAPI app as a Python Function. Vercel's functi
    EMBEDDING_MODEL=gemini-embedding-001
    EMBEDDING_DIMENSION=768
    ```
-6. Deploy to Production. After the environment variables are configured, initialize the demo data once from the project root:
+6. Keep Vercel SSO protection enabled for all deployment URLs. The project has no application login, so this is required to restrict the API and upload-token endpoint to team members.
+7. Deploy to Production. After the environment variables are configured, initialize the demo data once from the project root:
    ```powershell
    vercel env run --environment=production -- python -m backend.seed
    ```
 
 Never commit `.env` or paste deployment secrets into source control. The repository's `.env.example` contains local-development defaults; set production values in Vercel Project Settings.
+
+After editing `frontend/blob-upload.js`, rebuild its static browser module before deploying:
+```powershell
+npm install
+npm run bundle:uploads
+```

@@ -1,6 +1,6 @@
 # SkillBridge AI — AI-Powered Quiz/MCQ Generation Module Dependencies
 google-genai>=0.1.1
-fastapi>=0.110.0
+fastapi>=0.115.6
 uvicorn[standard]>=0.28.0
 pydantic>=2.6.0
 pydantic-settings>=2.2.0
@@ -8,10 +8,10 @@ python-dotenv>=1.0.1
 pdfplumber>=0.10.4
 python-docx>=1.1.0
 sqlalchemy>=2.0.28
-python-multipart>=0.0.9
+python-multipart>=0.0.18
 requests>=2.31.0
 pytest>=8.0.0
-httpx>=0.27.0
+httpx>=0.28.1
 qdrant-client>=1.12.0
 vercel-blob>=0.5.0
 psycopg[binary]>=3.2.0

@@ -29,6 +29,12 @@ class TrainingMaterialOut(BaseModel):
     class Config:
         from_attributes = True
 
+class TrainingMaterialBlobUploadRequest(BaseModel):
+    pathname: str
+    skill_id: str
+    title: Optional[str] = None
+    uploaded_by: str = "Admin/Trainer"
+
 class QuizGenerateRequest(BaseModel):
     skill_id: str
     material_id: Optional[int] = None

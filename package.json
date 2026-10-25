@@ -1,0 +1,15 @@
+{
+  "type": "module",
+  "scripts": {
+    "bundle:uploads": "esbuild frontend/blob-upload.js --bundle --format=esm --platform=browser --outfile=frontend/blob-upload.bundle.js"
+  },
+  "dependencies": {
+    "@vercel/blob": "^2.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  },
+  "overrides": {
+    "zod": "4.6.7"
+  }
+}
